@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { getMeetingByRoomId, addMeetingParticipant, startMeeting, recordParticipantLeave, getMeetingParticipants } from '@/lib/supabase/client'
 
@@ -24,7 +24,7 @@ interface ParticipantData {
   isHost?: boolean
 }
 
-export default function SimpleMeeting() {
+function SimpleMeetingContent() {
   const searchParams = useSearchParams()
   const roomId = searchParams.get('room') || `sirius-demo-${Date.now()}`
   const hostName = searchParams.get('host')
@@ -792,4 +792,26 @@ export default function SimpleMeeting() {
       </div>
     </div>
   )
-} 
+}
+
+// Loading component para Suspense
+function SimpleMeetingLoading() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-emerald-900 via-teal-800 to-green-900 flex items-center justify-center">
+      <div className="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20 shadow-2xl text-center">
+        <div className="w-16 h-16 mx-auto mb-4 border-4 border-emerald-300 border-t-transparent rounded-full animate-spin"></div>
+        <h2 className="text-xl font-bold text-white mb-2">Cargando Reunión</h2>
+        <p className="text-emerald-200">Preparando la sala de videoconferencia...</p>
+      </div>
+    </div>
+  )
+}
+
+// Componente principal con Suspense boundary
+export default function SimpleMeeting() {
+  return (
+    <Suspense fallback={<SimpleMeetingLoading />}>
+      <SimpleMeetingContent />
+    </Suspense>
+  )
+}
