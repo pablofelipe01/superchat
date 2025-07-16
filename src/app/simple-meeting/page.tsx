@@ -269,6 +269,124 @@ function SimpleMeetingContent() {
     }
   }
 
+  // Función de diagnóstico completo de audio
+  const diagnoseAudio = async () => {
+    log("🔍 === DIAGNÓSTICO COMPLETO DE AUDIO ===")
+    
+    try {
+      // 1. Verificar soporte de navegador
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        log("❌ El navegador no soporta getUserMedia")
+        return false
+      }
+      log("✅ Navegador soporta getUserMedia")
+
+      // 2. Verificar permisos
+      try {
+        const permissions = await navigator.permissions.query({ name: 'microphone' as PermissionName })
+        log(`🎤 Permiso de micrófono: ${permissions.state}`)
+        
+        if (permissions.state === 'denied') {
+          log("❌ PERMISOS DENEGADOS - El usuario debe permitir acceso al micrófono")
+          alert("⚠️ Permisos de micrófono denegados. Por favor, permite el acceso al micrófono en la configuración del navegador.")
+          return false
+        }
+      } catch (error) {
+        log(`⚠️ No se pudo verificar permisos: ${error}`)
+      }
+
+      // 3. Enumerar dispositivos de audio
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      const audioInputDevices = devices.filter(device => device.kind === 'audioinput')
+      const audioOutputDevices = devices.filter(device => device.kind === 'audiooutput')
+      
+      log(`🎤 Dispositivos de entrada: ${audioInputDevices.length}`)
+      audioInputDevices.forEach((device, index) => {
+        log(`   ${index + 1}. ${device.label || 'Dispositivo sin nombre'} (${device.deviceId.substring(0, 8)}...)`)
+      })
+      
+      log(`🔊 Dispositivos de salida: ${audioOutputDevices.length}`)
+      audioOutputDevices.forEach((device, index) => {
+        log(`   ${index + 1}. ${device.label || 'Dispositivo sin nombre'} (${device.deviceId.substring(0, 8)}...)`)
+      })
+
+      if (audioInputDevices.length === 0) {
+        log("❌ NO HAY MICRÓFONOS DISPONIBLES")
+        alert("❌ No se detectaron micrófonos. Verifica que tienes un micrófono conectado.")
+        return false
+      }
+
+      // 4. Probar acceso directo al micrófono
+      log("🔄 Probando acceso directo al micrófono...")
+      try {
+        const testStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        })
+        
+        log("✅ Acceso directo al micrófono exitoso")
+        
+        // Verificar tracks del stream
+        const audioTracks = testStream.getAudioTracks()
+        log(`🎵 Audio tracks obtenidos: ${audioTracks.length}`)
+        
+        if (audioTracks.length > 0) {
+          const track = audioTracks[0]
+          log(`🎤 Track info: enabled=${track.enabled}, muted=${track.muted}, readyState=${track.readyState}`)
+          log(`🎤 Configuración: ${JSON.stringify(track.getSettings())}`)
+        }
+        
+        // Limpiar el stream de prueba
+        testStream.getTracks().forEach(track => track.stop())
+        log("🧹 Stream de prueba cerrado")
+        
+      } catch (error: any) {
+        log(`❌ ERROR EN ACCESO AL MICRÓFONO: ${error}`)
+        alert(`❌ Error accediendo al micrófono: ${error.message}`)
+        return false
+      }
+
+      // 5. Probar creación con Agora
+      if ((window as any).AgoraRTC) {
+        log("🔄 Probando creación de audio track con Agora...")
+        try {
+          const AgoraRTC = (window as any).AgoraRTC
+          const testAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({
+            AGC: true,
+            ANS: true,
+            AEC: true
+          })
+          
+          log("✅ Audio track de Agora creado exitosamente")
+          log(`🎤 Agora track: enabled=${testAudioTrack.enabled}, muted=${testAudioTrack.muted}`)
+          
+          // Probar nivel de volumen
+          if (testAudioTrack.getVolumeLevel) {
+            const volume = testAudioTrack.getVolumeLevel()
+            log(`🔊 Nivel de volumen inicial: ${volume}`)
+          }
+          
+          testAudioTrack.close()
+          log("🧹 Agora test track cerrado")
+          
+                 } catch (error: any) {
+           log(`❌ ERROR CREANDO TRACK AGORA: ${error}`)
+           return false
+         }
+      }
+
+      log("✅ === DIAGNÓSTICO COMPLETADO - AUDIO DEBERÍA FUNCIONAR ===")
+      return true
+      
+         } catch (error: any) {
+       log(`❌ ERROR EN DIAGNÓSTICO: ${error}`)
+       return false
+     }
+  }
+
   const joinMeeting = async () => {
     if (!clientRef.current || !isLoaded) {
       log("❌ Client not ready")
@@ -563,6 +681,12 @@ function SimpleMeetingContent() {
                   <p className="text-emerald-200 mb-8">Haga clic en el botón para conectarse con su cámara y micrófono</p>
                   
                   <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                    <button
+                      onClick={diagnoseAudio}
+                      className="px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-full font-semibold transition-all duration-300 shadow-lg transform hover:scale-105 flex items-center gap-2 min-w-[180px] justify-center"
+                    >
+                      🔍 Diagnosticar Audio
+                    </button>
                     <button
                       onClick={joinMeeting}
                       disabled={isConnected || !isLoaded}
