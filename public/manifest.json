@@ -1,0 +1,29 @@
+{
+  "name": "Sirius Regenerative Video Platform",
+  "short_name": "Sirius Video",
+  "description": "Plataforma de videoconferencia para agricultura regenerativa",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A1A0A",
+  "theme_color": "#66B032",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/logo-sirius.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo-sirius.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "business", "utilities"],
+  "lang": "es",
+  "dir": "ltr",
+  "scope": "/",
+  "id": "sirius-regenerative-video"
+} 
