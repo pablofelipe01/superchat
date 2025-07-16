@@ -145,12 +145,19 @@ function SimpleMeetingContent() {
     const subscribeToUser = async (user: any, mediaType: string) => {
       try {
         await clientRef.current.subscribe(user, mediaType)
+        log(`✅ Subscrito a ${user.uid} para ${mediaType}`)
         
         if (mediaType === 'video' && user.videoTrack) {
           const remoteContainer = remoteUsersRef.current[user.uid]
           if (remoteContainer) {
             user.videoTrack.play(remoteContainer)
+            log(`📹 Video de ${user.uid} renderizado`)
           }
+        }
+        
+        if (mediaType === 'audio' && user.audioTrack) {
+          // El audio se reproduce automáticamente por Agora
+          log(`🎤 Audio de ${user.uid} disponible - volumen: ${user.audioTrack.getVolumeLevel ? user.audioTrack.getVolumeLevel() : 'N/A'}`)
         }
         
         setParticipants(prev => {
@@ -168,7 +175,7 @@ function SimpleMeetingContent() {
           return [...prev, newParticipant]
         })
       } catch (error) {
-        log(`❌ Error subscribing to ${user.uid}: ${error}`)
+        log(`❌ Error subscribing to ${user.uid} (${mediaType}): ${error}`)
       }
     }
 
@@ -294,6 +301,19 @@ function SimpleMeetingContent() {
 
       log("🎥 Creando video y audio...")
       
+      // Verificar permisos de media antes de crear tracks
+      try {
+        log("🔍 Verificando permisos de medios...")
+        const permissions = await navigator.permissions.query({ name: 'microphone' as PermissionName })
+        log(`🎤 Permiso de micrófono: ${permissions.state}`)
+        
+        if (permissions.state === 'denied') {
+          log("❌ Permisos de micrófono denegados")
+        }
+      } catch (error) {
+        log(`⚠️ No se pudo verificar permisos: ${error}`)
+      }
+      
       // Verificar disponibilidad de dispositivos
       try {
         const devices = await navigator.mediaDevices.enumerateDevices()
@@ -301,13 +321,25 @@ function SimpleMeetingContent() {
         const audioDevices = devices.filter(device => device.kind === 'audioinput')
         log(`📹 Cámaras disponibles: ${videoDevices.length}`)
         log(`🎤 Micrófonos disponibles: ${audioDevices.length}`)
+        
+        if (audioDevices.length === 0) {
+          log("❌ No se encontraron micrófonos disponibles")
+        }
       } catch (error) {
         log(`⚠️ Error enumerando dispositivos: ${error}`)
       }
 
       const AgoraRTC = (window as any).AgoraRTC
+      
+      log("🎤 Creando tracks de audio y video con configuración mejorada...")
       const [localAudioTrack, localVideoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks({
-        // Configuración para mejor compatibilidad
+        // Configuración de audio para mejor compatibilidad
+        audio: {
+          AGC: true, // Control automático de ganancia
+          ANS: true, // Supresión de ruido
+          AEC: true  // Cancelación de eco
+        },
+        // Configuración de video para mejor compatibilidad
         video: {
           width: 320,
           height: 240,
@@ -320,6 +352,12 @@ function SimpleMeetingContent() {
 
       log(`📹 Video track creado: ${localVideoTrack ? 'SÍ' : 'NO'}`)
       log(`🎤 Audio track creado: ${localAudioTrack ? 'SÍ' : 'NO'}`)
+      
+      if (localAudioTrack) {
+        log(`🎤 Audio track habilitado: ${localAudioTrack.enabled}`)
+        log(`🎤 Audio track muted: ${localAudioTrack.muted}`)
+        log(`🎤 Audio track estado: ${localAudioTrack.getMediaStreamTrack()?.readyState}`)
+      }
       
       if (localVideoTrack) {
         log(`📹 Video track habilitado: ${localVideoTrack.enabled}`)
@@ -392,14 +430,22 @@ function SimpleMeetingContent() {
 
   const toggleAudio = () => {
     if (localTracksRef.current.audio) {
-      if (isAudioMuted) {
-        localTracksRef.current.audio.setEnabled(true)
-        log("🎤 Audio activado")
-      } else {
-        localTracksRef.current.audio.setEnabled(false)
-        log("🔇 Audio silenciado")
+      try {
+        if (isAudioMuted) {
+          localTracksRef.current.audio.setEnabled(true)
+          log("🎤 Audio activado")
+          log(`🎤 Estado audio track: habilitado=${localTracksRef.current.audio.enabled}, muted=${localTracksRef.current.audio.muted}`)
+        } else {
+          localTracksRef.current.audio.setEnabled(false)
+          log("🔇 Audio silenciado")
+          log(`🎤 Estado audio track: habilitado=${localTracksRef.current.audio.enabled}, muted=${localTracksRef.current.audio.muted}`)
+        }
+        setIsAudioMuted(!isAudioMuted)
+      } catch (error) {
+        log(`❌ Error controlando audio: ${error}`)
       }
-      setIsAudioMuted(!isAudioMuted)
+    } else {
+      log("❌ No hay track de audio disponible")
     }
   }
 
