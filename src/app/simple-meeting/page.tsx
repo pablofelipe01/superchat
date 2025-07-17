@@ -168,12 +168,40 @@ function SimpleMeetingContent() {
         }
         
         if (mediaType === 'audio' && user.audioTrack) {
-          // IMPORTANTE: Reproducir explícitamente el audio remoto
+          // IMPORTANTE: Reproducir explícitamente el audio remoto con reintentos
           try {
-            user.audioTrack.play()
-            log(`🎤 Audio de ${user.uid} REPRODUCIENDO - volumen: ${user.audioTrack.getVolumeLevel ? user.audioTrack.getVolumeLevel() : 'N/A'}`)
+            await user.audioTrack.play()
+            
+            // Configurar volumen alto para audio remoto
+            if (user.audioTrack.setVolume) {
+              user.audioTrack.setVolume(100)
+            }
+            
+            log(`🎤 Audio de ${user.uid} REPRODUCIENDO EXITOSAMENTE`)
+            log(`🔊 Volumen: ${user.audioTrack.getVolumeLevel ? user.audioTrack.getVolumeLevel() : 'N/A'}`)
+            
+            // Monitorear audio remoto
+            const audioMonitor = setInterval(() => {
+              if (user.audioTrack && user.audioTrack.getVolumeLevel) {
+                const volume = user.audioTrack.getVolumeLevel()
+                if (volume > 0) {
+                  log(`🎵 Audio activo de ${user.uid}: ${volume}`)
+                }
+              }
+            }, 10000) // Check cada 10 segundos
+            
           } catch (audioError) {
             log(`❌ Error reproduciendo audio de ${user.uid}: ${audioError}`)
+            
+            // Reintentar después de 1 segundo
+            setTimeout(async () => {
+              try {
+                await user.audioTrack.play()
+                log(`✅ Audio de ${user.uid} reintentado exitosamente`)
+              } catch (retryError) {
+                log(`❌ Reintento de audio falló para ${user.uid}: ${retryError}`)
+              }
+            }, 1000)
           }
         }
         
@@ -183,12 +211,14 @@ function SimpleMeetingContent() {
             return prev
           }
           
-          // Crear nuevo participante con nombre temporal
+          // Crear nuevo participante con nombre único
+          const userName = generateParticipantName(user.uid)
           const newParticipant: ParticipantData = {
             uid: user.uid,
-            name: `UID: ${String(user.uid).substring(0, 8)}...` // Temporal hasta cargar nombre real
+            name: userName
           }
           
+          log(`👤 Nuevo participante agregado: ${userName} (UID: ${user.uid})`)
           return [...prev, newParticipant]
         })
       } catch (error) {
@@ -211,7 +241,16 @@ function SimpleMeetingContent() {
     }
   }, [isConnected, log])
 
-  // Función para cargar nombres de participantes desde la BD
+  // Función simplificada para generar nombres únicos
+  const generateParticipantName = useCallback((uid: string) => {
+    // Generar nombre único basado en UID
+    const shortUid = String(uid).substring(0, 6)
+    const names = ['Alex', 'María', 'Carlos', 'Ana', 'Luis', 'Sofia', 'Diego', 'Laura']
+    const randomName = names[parseInt(shortUid, 10) % names.length]
+    return `${randomName} ${shortUid}`
+  }, [])
+
+  // Función para cargar nombres de participantes desde la BD (simplificada)
   const loadParticipantNames = useCallback(async () => {
     if (!meetingData) return
 
@@ -223,27 +262,7 @@ function SimpleMeetingContent() {
         return
       }
 
-      // Actualizar participantes con nombres reales
-      setParticipants(prev => 
-        prev.map(participant => {
-          const dbParticipant = dbParticipants.find(db => 
-            db.participant_name && participant.name.includes('UID:')
-          )
-          
-          if (dbParticipant) {
-            return {
-              ...participant,
-              name: dbParticipant.participant_name,
-              participantId: dbParticipant.id,
-              isHost: dbParticipant.is_host
-            }
-          }
-          
-          return participant
-        })
-      )
-
-      log(`✅ Nombres de participantes cargados: ${dbParticipants.length} encontrados`)
+      log(`✅ Datos de participantes en BD: ${dbParticipants.length} encontrados`)
     } catch (error) {
       log(`❌ Error cargando nombres: ${error}`)
     }
@@ -494,19 +513,22 @@ function SimpleMeetingContent() {
 
       const AgoraRTC = (window as any).AgoraRTC
       
-      log("🎤 Creando tracks de audio y video con configuración mejorada...")
+      log("🎤 Creando tracks de audio y video con ALTA CALIDAD...")
       const [localAudioTrack, localVideoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks({
-        // Configuración de audio para mejor compatibilidad
+        // Configuración de audio ESTABLE
         audio: {
           AGC: true, // Control automático de ganancia
           ANS: true, // Supresión de ruido
-          AEC: true  // Cancelación de eco
+          AEC: true, // Cancelación de eco
+          volume: 100, // Volumen máximo
+          encoderConfig: "high_quality_stereo" // Alta calidad
         },
-        // Configuración de video para mejor compatibilidad
+        // Configuración de video de ALTA CALIDAD
         video: {
-          width: 320,
-          height: 240,
-          frameRate: 15
+          width: { ideal: 1280, min: 640 },
+          height: { ideal: 720, min: 480 },
+          frameRate: { ideal: 30, min: 15 },
+          facingMode: "user"
         }
       })
       
@@ -573,7 +595,7 @@ function SimpleMeetingContent() {
     }
   }
 
-  // Función para monitorear el estado del audio continuamente
+  // Función para monitorear el estado del audio continuamente (MEJORADA)
   const startAudioMonitoring = () => {
     const monitorInterval = setInterval(() => {
       if (!isConnected || !localTracksRef.current.audio) {
@@ -586,21 +608,28 @@ function SimpleMeetingContent() {
       const audioMuted = audioTrack.muted
       const isPlaying = audioTrack.isPlaying
 
-      // Solo logear si hay cambios o problemas
-      if (!audioEnabled || audioMuted || !isPlaying) {
-        log(`⚠️ PROBLEMA AUDIO: enabled=${audioEnabled}, muted=${audioMuted}, playing=${isPlaying}`)
-        
-        // Intentar reactivar audio si está deshabilitado
-        if (!audioEnabled && !isAudioMuted) {
-          try {
-            audioTrack.setEnabled(true)
-            log(`🔧 Audio reactivado automáticamente`)
-          } catch (error) {
-            log(`❌ Error reactivando audio: ${error}`)
-          }
+      // Verificar estado del audio y reparar automáticamente
+      if (!audioEnabled && !isAudioMuted) {
+        log(`🔧 REPARANDO: Audio deshabilitado automáticamente`)
+        try {
+          audioTrack.setEnabled(true)
+          log(`✅ Audio reactivado exitosamente`)
+        } catch (error) {
+          log(`❌ Error reactivando audio: ${error}`)
         }
       }
-    }, 5000) // Verificar cada 5 segundos
+
+      // Log periódico del estado (solo si hay actividad)
+      if (audioTrack.getVolumeLevel && audioTrack.getVolumeLevel() > 0) {
+        log(`🎤 Mi audio activo: volumen=${audioTrack.getVolumeLevel()}`)
+      }
+
+      // Verificar que se esté enviando audio
+      if (!isPlaying && audioEnabled) {
+        log(`⚠️ Audio habilitado pero no se está enviando`)
+      }
+      
+    }, 3000) // Verificar cada 3 segundos (más frecuente)
   }
 
   const leaveMeeting = async () => {
