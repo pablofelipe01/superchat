@@ -122,17 +122,29 @@ function SimpleMeetingContent() {
         
         // Event listeners
         clientRef.current.on("user-published", (user: any, mediaType: string) => {
-          log(`🎥 Usuario se unió: ${user.uid} (${mediaType})`)
+          log(`🎥 Usuario publicó contenido: ${user.uid} (${mediaType})`)
+          log(`🔍 Detalles usuario: hasVideo=${!!user.videoTrack}, hasAudio=${!!user.audioTrack}`)
           subscribeToUser(user, mediaType)
         })
 
-        clientRef.current.on("user-unpublished", (user: any) => {
-          log(`👋 Usuario salió: ${user.uid}`)
+        clientRef.current.on("user-unpublished", (user: any, mediaType: string) => {
+          log(`👋 Usuario dejó de publicar: ${user.uid} (${mediaType})`)
+          if (mediaType === 'audio') {
+            log(`🔇 Audio de ${user.uid} desconectado`)
+          }
           setParticipants(prev => {
             const newParticipants = prev.filter(participant => participant.uid !== user.uid)
             log(`👥 Participantes actualizados: ${newParticipants.length} total`)
             return newParticipants
           })
+        })
+
+        clientRef.current.on("user-joined", (user: any) => {
+          log(`👤 Usuario se unió al canal: ${user.uid}`)
+        })
+
+        clientRef.current.on("user-left", (user: any) => {
+          log(`🚪 Usuario salió del canal: ${user.uid}`)
         })
         
         log("✅ Client ready")
@@ -156,8 +168,13 @@ function SimpleMeetingContent() {
         }
         
         if (mediaType === 'audio' && user.audioTrack) {
-          // El audio se reproduce automáticamente por Agora
-          log(`🎤 Audio de ${user.uid} disponible - volumen: ${user.audioTrack.getVolumeLevel ? user.audioTrack.getVolumeLevel() : 'N/A'}`)
+          // IMPORTANTE: Reproducir explícitamente el audio remoto
+          try {
+            user.audioTrack.play()
+            log(`🎤 Audio de ${user.uid} REPRODUCIENDO - volumen: ${user.audioTrack.getVolumeLevel ? user.audioTrack.getVolumeLevel() : 'N/A'}`)
+          } catch (audioError) {
+            log(`❌ Error reproduciendo audio de ${user.uid}: ${audioError}`)
+          }
         }
         
         setParticipants(prev => {
@@ -378,7 +395,35 @@ function SimpleMeetingContent() {
          }
       }
 
+      // 6. Probar reproducción de audio (test de altavoces)
+      log("🔄 Probando reproducción de audio...")
+      try {
+        // Crear un tono de prueba para verificar altavoces
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+        const oscillator = audioContext.createOscillator()
+        const gainNode = audioContext.createGain()
+        
+        oscillator.connect(gainNode)
+        gainNode.connect(audioContext.destination)
+        
+        oscillator.frequency.setValueAtTime(440, audioContext.currentTime) // La nota A
+        oscillator.type = 'sine'
+        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime) // Volumen bajo
+        
+        oscillator.start()
+        oscillator.stop(audioContext.currentTime + 0.5) // Reproducir por 0.5 segundos
+        
+        log("✅ Test de reproducción de audio completado (deberías haber escuchado un tono)")
+        
+        // Esperar un poco antes de continuar
+        await new Promise(resolve => setTimeout(resolve, 600))
+        
+      } catch (error) {
+        log(`⚠️ Error en test de reproducción: ${error}`)
+      }
+
       log("✅ === DIAGNÓSTICO COMPLETADO - AUDIO DEBERÍA FUNCIONAR ===")
+      alert("✅ Diagnóstico completado. Revisa la consola para detalles. Si escuchaste un tono, los altavoces funcionan.")
       return true
       
          } catch (error: any) {
@@ -500,15 +545,62 @@ function SimpleMeetingContent() {
       log("✅ CONECTADO!")
 
       // Publicar
+      log("🚀 Iniciando publicación de video y audio...")
       await clientRef.current.publish([localAudioTrack, localVideoTrack])
       log("✅ PUBLICADO!")
       
+      // Verificar que los tracks se publicaron correctamente
+      const publishedTracks = clientRef.current.localTracks
+      log(`📊 Tracks publicados: ${publishedTracks ? publishedTracks.length : 0}`)
+      
+      if (localAudioTrack) {
+        log(`🎤 Estado FINAL audio local: enabled=${localAudioTrack.enabled}, muted=${localAudioTrack.muted}`)
+        log(`🎤 Audio está siendo enviado: ${localAudioTrack.isPlaying ? 'SÍ' : 'NO'}`)
+      }
+      
+      if (localVideoTrack) {
+        log(`📹 Estado FINAL video local: enabled=${localVideoTrack.enabled}, muted=${localVideoTrack.muted}`)
+      }
+      
       setIsConnected(true)
+      
+      // Iniciar monitoreo continuo del audio
+      startAudioMonitoring()
 
     } catch (error: any) {
       log(`❌ ERROR: ${error.message}`)
       console.error(error)
     }
+  }
+
+  // Función para monitorear el estado del audio continuamente
+  const startAudioMonitoring = () => {
+    const monitorInterval = setInterval(() => {
+      if (!isConnected || !localTracksRef.current.audio) {
+        clearInterval(monitorInterval)
+        return
+      }
+
+      const audioTrack = localTracksRef.current.audio
+      const audioEnabled = audioTrack.enabled
+      const audioMuted = audioTrack.muted
+      const isPlaying = audioTrack.isPlaying
+
+      // Solo logear si hay cambios o problemas
+      if (!audioEnabled || audioMuted || !isPlaying) {
+        log(`⚠️ PROBLEMA AUDIO: enabled=${audioEnabled}, muted=${audioMuted}, playing=${isPlaying}`)
+        
+        // Intentar reactivar audio si está deshabilitado
+        if (!audioEnabled && !isAudioMuted) {
+          try {
+            audioTrack.setEnabled(true)
+            log(`🔧 Audio reactivado automáticamente`)
+          } catch (error) {
+            log(`❌ Error reactivando audio: ${error}`)
+          }
+        }
+      }
+    }, 5000) // Verificar cada 5 segundos
   }
 
   const leaveMeeting = async () => {
